@@ -44,6 +44,19 @@ function App() {
   }, []);
   // --- End Authentication Effect ---
 
+  // --- Logout Handler ---
+  const handleLogout = async () => {
+    setLoading(true); // Optional: show loading state during logout
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      console.error('Error logging out:', error);
+      // Handle error appropriately, maybe show a notification
+    }
+    // setSession(null) will be handled by onAuthStateChange listener
+    setLoading(false); // Hide loading state
+  };
+  // --- End Logout Handler ---
+
   const setCurrentPage = (newPage: string) => {
     if (newPage !== currentPage) {
       setPreviousPage(currentPage);
@@ -86,7 +99,12 @@ function App() {
     <DndProvider backend={HTML5Backend}>
       <TeamProvider setCurrentPage={setCurrentPage} selectGame={selectGame}>
         {showMainLayout ? (
-          <Layout currentPage={currentPage} setCurrentPage={setCurrentPage}>
+          <Layout
+            currentPage={currentPage}
+            setCurrentPage={setCurrentPage}
+            isLoggedIn={!!session} // Pass login status
+            onLogout={handleLogout} // Pass logout handler
+          >
             {renderPage()}
           </Layout>
         ) : (

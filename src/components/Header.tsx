@@ -1,10 +1,12 @@
-import React, { useContext, useState, useRef, ChangeEvent } from 'react'; // Added useState
-import { Shield, Users, Calendar, BarChart2, Plus } from 'lucide-react'; // Added Plus
+import React, { useContext, useState, useRef, ChangeEvent, useEffect } from 'react'; // Added useEffect
+import { Shield, Users, Calendar, BarChart2, Plus, LogOut } from 'lucide-react';
 import { TeamContext } from '../context/TeamContext';
 
 interface HeaderProps {
   currentPage: string;
   setCurrentPage: (page: string) => void;
+  isLoggedIn: boolean;
+  onLogout: () => void;
 }
 
 const HeaderNavLink: React.FC<{
@@ -30,25 +32,34 @@ const HeaderNavLink: React.FC<{
 };
 
 
-const Header: React.FC<HeaderProps> = ({ currentPage, setCurrentPage }) => {
-  // Get teamName, setTeamName, teamLogo, setTeamLogo from context
-  const { teamName, setTeamName, teamLogo, setTeamLogo } = useContext(TeamContext);
+const Header: React.FC<HeaderProps> = ({ currentPage, setCurrentPage, isLoggedIn, onLogout }) => {
+  // Get team data and update functions from context
+  const { teamData, teamLoading, updateTeamNameInDb, updateTeamLogoInDb } = useContext(TeamContext);
   const [isEditingName, setIsEditingName] = useState(false);
-  const [newName, setNewName] = useState(teamName);
+  const [newName, setNewName] = useState(''); // Initialize empty, will be set by effect
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const showBottomNav = ['team', 'schedule', 'stats'].includes(currentPage);
+
+  // Effect to update local edit state when teamData changes
+  useEffect(() => {
+    if (teamData) {
+      setNewName(teamData.name);
+    } else {
+      setNewName(''); // Reset if teamData is null
+    }
+  }, [teamData]);
 
   // --- Handlers for inline name editing ---
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setNewName(e.target.value);
   };
 
-  const handleNameSave = () => {
-    if (newName.trim()) {
-      setTeamName(newName.trim());
-    } else {
-      setNewName(teamName); // Revert if empty
+  const handleNameSave = async () => {
+    if (newName.trim() && newName.trim() !== teamData?.name) {
+      await updateTeamNameInDb(newName.trim()); // Call context function to update DB
+    } else if (!newName.trim() && teamData) {
+      setNewName(teamData.name); // Revert if empty
     }
     setIsEditingName(false);
   };
@@ -57,7 +68,7 @@ const Header: React.FC<HeaderProps> = ({ currentPage, setCurrentPage }) => {
     if (e.key === 'Enter') {
       handleNameSave();
     } else if (e.key === 'Escape') {
-      setNewName(teamName); // Revert on escape
+      setNewName(teamData?.name || ''); // Revert on escape
       setIsEditingName(false);
     }
   };
@@ -72,13 +83,17 @@ const Header: React.FC<HeaderProps> = ({ currentPage, setCurrentPage }) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setTeamLogo(reader.result as string);
+      reader.onloadend = async () => {
+        const base64Logo = reader.result as string;
+        await updateTeamLogoInDb(base64Logo); // Call context function to update DB
       };
       reader.readAsDataURL(file);
     }
   };
   // --- End Handlers ---
+
+  const currentTeamName = teamLoading ? 'Loading...' : teamData?.name || 'My Team';
+  const currentTeamLogo = teamData?.logo_url;
 
   return (
     <header className="bg-red-700 text-white sticky top-0 z-20 shadow">
@@ -93,21 +108,19 @@ const Header: React.FC<HeaderProps> = ({ currentPage, setCurrentPage }) => {
             onChange={handleLogoChange}
             accept="image/*"
             className="hidden"
+            disabled={teamLoading} // Disable while loading
           />
           <button
             onClick={handleLogoClick}
-            // Removed rounded-full, bg-gray-200. Added padding for click area.
-            className="w-10 h-10 flex items-center justify-center text-white hover:opacity-80 transition cursor-pointer overflow-hidden flex-shrink-0 p-1"
+            className="w-10 h-10 flex items-center justify-center text-white hover:opacity-80 transition cursor-pointer overflow-hidden flex-shrink-0 p-1 disabled:opacity-50 disabled:cursor-not-allowed"
             aria-label="Change team logo"
+            disabled={teamLoading} // Disable while loading
           >
-            {teamLogo ? (
-              <img src={teamLogo} alt="Team Logo" className="w-full h-full object-cover rounded-full" /> // Keep rounded for actual logo
+            {currentTeamLogo ? (
+              <img src={currentTeamLogo} alt="Team Logo" className="w-full h-full object-cover rounded-full" />
             ) : (
-              // Removed bg-gray-500 from this div
               <div className="relative w-full h-full flex items-center justify-center">
-                {/* Adjusted shield size and opacity */}
                 <Shield size={24} className="text-white opacity-60" />
-                {/* Adjusted plus size and position slightly */}
                 <Plus size={14} className="absolute text-white" />
               </div>
             )}
@@ -119,30 +132,44 @@ const Header: React.FC<HeaderProps> = ({ currentPage, setCurrentPage }) => {
               type="text"
               value={newName}
               onChange={handleNameChange}
-              onBlur={handleNameSave} // Save on blur
+              onBlur={handleNameSave}
               onKeyDown={handleNameKeyDown}
-              className="text-lg font-semibold bg-red-800 border-b border-white focus:outline-none px-1 py-0.5 text-white" // Ensure text is visible
+              className="text-lg font-semibold bg-red-800 border-b border-white focus:outline-none px-1 py-0.5 text-white"
               autoFocus
+              disabled={teamLoading} // Disable while loading
             />
           ) : (
-            // Make only the name clickable for editing
             <span
-              className="font-semibold text-lg cursor-pointer hover:opacity-80"
-              onClick={() => setIsEditingName(true)} // Trigger edit on click
+              className={`font-semibold text-lg ${teamLoading ? 'opacity-50' : 'cursor-pointer hover:opacity-80'}`}
+              onClick={() => !teamLoading && setIsEditingName(true)} // Allow edit only if not loading
             >
-              {teamName || 'Your Team'}
+              {currentTeamName}
             </span>
           )}
         </div>
 
-        {/* Lineup Button */}
-        <button
-          onClick={() => setCurrentPage('lineup')}
-          className="hover:opacity-80 transition-opacity p-1 rounded-full hover:bg-red-600"
-          aria-label="Edit Lineup"
-        >
-          <img src="/lineup-icon.svg" alt="Lineup" className="w-6 h-6 invert" />
-        </button>
+        {/* Right Side Icons: Lineup and Logout */}
+        <div className="flex items-center space-x-3">
+          {/* Lineup Button */}
+          <button
+            onClick={() => setCurrentPage('lineup')}
+            className="hover:opacity-80 transition-opacity p-1 rounded-full hover:bg-red-600"
+            aria-label="Edit Lineup"
+          >
+            <img src="/lineup-icon.svg" alt="Lineup" className="w-6 h-6 invert" />
+          </button>
+
+          {/* Logout Button (Conditional) */}
+          {isLoggedIn && (
+            <button
+              onClick={onLogout}
+              className="hover:opacity-80 transition-opacity p-1 rounded-full hover:bg-red-600"
+              aria-label="Logout"
+            >
+              <LogOut size={22} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Bottom navigation part */}

@@ -10,18 +10,26 @@ const SignUpForm: React.FC = () => {
   const [message, setMessage] = useState<string | null>(null);
 
   // Function to create a team for the new user
-  const createTeamForUser = async (userId: string, teamName: string = 'My Team') => {
+  const createTeamForUser = async (userId: string, teamName: string) => {
+    console.log(`Attempting to create team for user ${userId} with name ${teamName}`);
+    // Insert into the 'teams' table using the user_id and provided name
     const { error: teamError } = await supabase
       .from('teams')
-      .insert({ user_id: userId, name: teamName }); // logo_url defaults to NULL
+      .insert({
+        user_id: userId,
+        name: teamName,
+        // logo_url defaults to NULL in the database schema
+      })
+      .select() // Select to confirm insertion and potentially catch RLS issues if insert fails silently
+      .single(); // Expecting a single row back
 
     if (teamError) {
       console.error('Error creating team:', teamError);
-      // Handle error appropriately - maybe notify user or log
-      // For now, we'll let the sign-up proceed but log the error
-      setError(`Account created, but failed to create team: ${teamError.message}`);
+      // Set error state to inform the user, even if signup was technically successful
+      setError(`Account created, but failed to initialize team: ${teamError.message}. Please try logging out and back in, or contact support.`);
     } else {
       console.log('Team created successfully for user:', userId);
+      // Team creation successful, no need to set a message here as the main signup message handles it.
     }
   };
 
@@ -36,29 +44,43 @@ const SignUpForm: React.FC = () => {
       const { data, error: signUpError } = await supabase.auth.signUp({
         email: email,
         password: password,
-        // options: { emailRedirectTo: window.location.origin } // Not needed if email confirmation is off
+        // Assuming email confirmation is disabled in Supabase project settings
       });
 
       if (signUpError) {
-        throw signUpError;
-      }
-
-      if (data.user) {
+        // Handle specific errors like user already registered
+        if (signUpError.message.includes("User already registered")) {
+           setError("This email is already registered. Please try logging in.");
+        } else {
+           throw signUpError; // Throw other sign-up errors
+        }
+      } else if (data.user) {
         // CRITICAL: Create the team immediately after successful sign-up
-        await createTeamForUser(data.user.id, `${email.split('@')[0]}'s Team`); // Use part of email for default name
+        // Use part of the email for a default team name
+        const defaultTeamName = `${email.split('@')[0]}'s Team`;
+        await createTeamForUser(data.user.id, defaultTeamName);
 
-        // Since email confirmation is likely disabled in Supabase settings (default for new projects),
-        // the user is effectively logged in. App.tsx's onAuthStateChange will handle it.
-        setMessage('Sign up successful! You are now logged in.');
-        // console.log('Sign up successful, user:', data.user);
+        // Check if an error occurred during team creation
+        if (!error) {
+            // Since email confirmation is likely disabled, the user is logged in.
+            // App.tsx's onAuthStateChange will handle the session update.
+            setMessage('Sign up successful! You are now logged in.');
+            // console.log('Sign up successful, user:', data.user);
+        }
+        // If 'error' state was set by createTeamForUser, it will be displayed.
+
       } else {
          // This case might happen with email confirmation enabled, but we assume it's off.
-         setMessage('Sign up successful. Please check your email to confirm.');
+         // Or if there's an unexpected issue with the signup response.
+         setMessage('Sign up process initiated. If email confirmation is required, please check your email.');
+         console.warn("SignUp successful but no user data returned immediately.", data);
       }
 
     } catch (err: any) {
       console.error('Sign up error:', err);
-      setError(err.error_description || err.message || 'Failed to sign up.');
+      if (!error) { // Avoid overwriting specific team creation errors
+          setError(err.error_description || err.message || 'Failed to sign up.');
+      }
     } finally {
       setLoading(false);
     }
@@ -67,7 +89,7 @@ const SignUpForm: React.FC = () => {
   return (
     <form onSubmit={handleSignUp} className="space-y-5">
       {error && <p className="text-red-500 text-sm text-center bg-red-100 p-2 rounded">{error}</p>}
-      {message && <p className="text-green-600 text-sm text-center bg-green-100 p-2 rounded">{message}</p>}
+      {message && !error && <p className="text-green-600 text-sm text-center bg-green-100 p-2 rounded">{message}</p>} {/* Show message only if no error */}
       <div>
         <label htmlFor="email-signup" className="block text-sm font-medium text-gray-700 mb-1">
           Email
